@@ -6,21 +6,28 @@ namespace HTTP_Proxy
 {
     class HTTPRequest
     {
-        public HTTPHeader hdr;
+        public HTTPRequestHeader reqHdr;
         public byte[] data;
+        public int reqLength;
 
         public HTTPRequest() { }
 
         public HTTPRequest(byte[] buffer, int bufLength)
         {
-            hdr = new HTTPHeader(buffer);
-            if (hdr.hdrLength < bufLength) { buffer.CopyTo(data, hdr.hdrLength + 1); }
+            reqHdr = new HTTPRequestHeader(buffer);
+            reqLength = bufLength;
+
+            if (reqHdr.hdrLength < reqLength)
+            {
+                data = new byte[bufLength - reqHdr.hdrLength];
+                Array.Copy(buffer, reqHdr.hdrLength, data, 0, data.Length);
+            }
             else { data = null; }
         }
 
         public byte[] GetRequestBytes()
         {
-            var hdrBytes = hdr.GetHeaderBytes();
+            var hdrBytes = reqHdr.GetHeaderBytes();
             if (data != null)
             {
                 var resBytes = new byte[hdrBytes.Length + data.Length];
@@ -33,9 +40,9 @@ namespace HTTP_Proxy
         }
     }
 
-    class HTTPHeader
+    class HTTPRequestHeader
     {
-        public enum HttpMethod { GET, POST, CONNECT }
+        public enum HttpMethod { GET, POST, CONNECT, HEAD }
 
         public int hdrLength;
         public String relAddr;
@@ -43,16 +50,12 @@ namespace HTTP_Proxy
         public int portNo = 80;
         public HttpMethod method;
         public Dictionary<String, String> httpHdrDict;
+        public String firstLine;
 
 
-        public HTTPHeader() { }
+        public HTTPRequestHeader() { }
 
-        public HTTPHeader(byte[] buffer)
-        {
-            ParseHTTPHeader(buffer);
-        }
-
-        private void ParseHTTPHeader(byte[] buffer)
+        public HTTPRequestHeader(byte[] buffer)
         {
             int nowAtIndex = Array.IndexOf<byte>(buffer, 10, 0);
 
@@ -78,7 +81,7 @@ namespace HTTP_Proxy
             };
             var parsedLines = headerText.Split("\r\n");
 
-            var firstLine = parsedLines[0];
+            firstLine = parsedLines[0];
             for (int i = 1; i < parsedLines.Length; i++)
             {
                 var parsedTheLine = parsedLines[i].Split(": ");
@@ -106,6 +109,14 @@ namespace HTTP_Proxy
                 }
                 portNo = int.Parse(connectTo[1]);
             }
+            else if (reqFirstLine[0] == "HEAD")
+            {
+                method = HttpMethod.HEAD;
+            }
+            else if (reqFirstLine[0] == "POST")
+            {
+                method = HttpMethod.POST;
+            }
 
         }
 
@@ -127,7 +138,5 @@ namespace HTTP_Proxy
 
             return null;
         }
-
-
     }
 }

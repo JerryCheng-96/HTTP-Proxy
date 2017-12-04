@@ -5,6 +5,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 
 namespace HTTP_Proxy
 {
@@ -12,16 +13,22 @@ namespace HTTP_Proxy
     {
 
         private const int bufferSize = 4096;
-        private static Dictionary<Socket, Session> connectionList;
+        private static int connectionCnt = 0;
 
         static void Main(string[] args)
         {
             Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             serverSocket.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.1"), 8080));
-            serverSocket.Listen(10);
-            connectionList = new Dictionary<Socket, Session>(); 
+            serverSocket.Listen(20);
 
-            serverSocket.BeginAccept(Accepting, serverSocket);
+            while (true)
+            {
+                ConnectionThread connThrd = new ConnectionThread(serverSocket.Accept());
+                Thread procThrd = new Thread(new ThreadStart(connThrd.ProcConnection));
+                procThrd.Name = "Connection #" + connectionCnt++;
+                Console.WriteLine("Starting " + procThrd.Name);
+                procThrd.Start();
+            }
 
             Console.ReadLine();
 
@@ -32,36 +39,43 @@ namespace HTTP_Proxy
             Socket serverSocket = (Socket)ar.AsyncState;
             Socket withClient = serverSocket.EndAccept(ar);
 
-            if (connectionList.ContainsKey(withClient))
-            {
-                
-            }
-            
-
-
-            var recvBuffer = new byte[bufferSize];
-            var buffer = new byte[bufferSize];
-            int bufSizeFactor = 1;
-
-            var cnt = withClient.Receive(recvBuffer);
-            recvBuffer.CopyTo(buffer, (bufSizeFactor - 1) * bufferSize);
-
-            while (true)
-            {
-                bufSizeFactor *= 2;
-                if (cnt < (bufSizeFactor / 2) * bufferSize) { break; }
-                Array.Resize(ref buffer, bufSizeFactor * bufferSize);
-                cnt = withClient.Receive(buffer);
-                recvBuffer.CopyTo(buffer, (bufSizeFactor / 2) * bufferSize);
-            }
-
-            var req = new HTTPRequest(buffer, cnt);
-            connectionList.Add(withClient, new Session(withClient, ConnectToServer.InitConnection(req)));
-
-            Console.WriteLine(Encoding.UTF8.GetString(buffer, 0, cnt));
+            ConnectionThread connThrd = new ConnectionThread(withClient);
+            Thread procThrd = new Thread(new ThreadStart(connThrd.ProcConnection));
+            procThrd.Name = "CONNECTION";
+            procThrd.Start();
 
         }
+    }
+
+    class ConnectionThread
+    {
+        public Socket withClient;
+        public Socket withServer;
+
+        public ConnectionThread(Socket withClient)
+        {
+            this.withClient = withClient;
+        }
+
+        public void ProcConnection()
+        {
+            switch (ConnectToServer.InitConnection(withClient, ref withServer))
+            {
+                case ConnectToServer.HttpMethod.GET:
+                    if (withServer == null) { return; }
+                    while (ConnectToServer.ProcGetRequest(withClient, withServer)) ;
+                    Console.WriteLine(Thread.CurrentThread.Name + " is to STOP.");
+                    break;
+
+                case ConnectToServer.HttpMethod.CONNECT:
+                    ConnectToServer.ConnectForward(withClient, withServer);
+                    break;
+
+                case ConnectToServer.HttpMethod.INVALID:
+                    break;
+            }
 
 
+        }
     }
 }
